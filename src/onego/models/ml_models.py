@@ -1,9 +1,10 @@
 """
-Pipeline ML con Circuit Breaker y Graceful Fallback para la ZMM.
+Pipeline ML con Intervalos de Confianza (Uncertainty Bounds) y Circuit Breaker.
 """
 from __future__ import annotations
 import pickle
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,9 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.model_selection import train_test_split
+
+# Silenciar advertencias de Scikit-Learn durante la inferencia de cuantiles
+warnings.filterwarnings("ignore", category=UserWarning)
 
 FEATURE_COLS = [
     "distance_km", "base_pay", "tip", "surge_multiplier",
@@ -22,7 +26,11 @@ FEATURE_COLS = [
 @dataclass
 class MLPrediction:
     estimated_time_minutes: float
+    time_lower_bound: float          # Cuantil 10% (Límite optimista)
+    time_upper_bound: float          # Cuantil 90% (Límite pesimista / peor caso)
+    uncertainty_range_minutes: float # Ancho del intervalo (P90 - P10)
     projected_earnings_per_min: float
+    pessimistic_epm: float           # EPM en el peor escenario de tiempo
     ml_confidence_score: float
     profitability_label: int
     is_degraded: bool = False
@@ -33,8 +41,8 @@ class DeliveryMLModel:
     def __init__(self, model_dir: str | Path = "artifacts"):
         self.model_dir = Path(model_dir)
         self.model_dir.mkdir(parents=True, exist_ok=True)
-        self.time_model = None
-        self.profit_model = None
+        self.time_model: RandomForestRegressor | None = None
+        self.profit_model: RandomForestClassifier | None = None
         self._trained = False
         self.is_degraded = False
 
@@ -76,10 +84,12 @@ class DeliveryMLModel:
         mountain_penalty = df["is_mountain_zone"] * (8.0 / df["vehicle_speed_factor"])
         gonzalitos_penalty = df["gonzalitos_bottle_neck"] * 10.0
 
+        noise_std = 1.0 + (df["distance_km"] * 0.3) + (df["traffic_level"] * 1.5)
         df["real_time_min"] = (
             5.0 + (df["distance_km"] / base_speed) * 60 
             + weather_penalty + risk_penalty + cross_mty_penalty 
-            + mountain_penalty + gonzalitos_penalty + rng.normal(0, 1.0, n)
+            + mountain_penalty + gonzalitos_penalty 
+            + rng.normal(0, noise_std, n)
         ).clip(lower=3.0)
         
         fuel_rate_map = {0.8: 1.5, 1.0: 4.5, 1.2: 8.0}
@@ -99,13 +109,17 @@ class DeliveryMLModel:
             return
         
         df = self._synthetic_dataset()
-        X, y_time, y_profit = df[FEATURE_COLS], df["real_time_min"], df["profitable"]
-        X_tr, X_te, yt_tr, yt_te, yp_tr, yp_te = train_test_split(X, y_time, y_profit, test_size=0.2, random_state=42)
+        # Entrenar usando matrices de NumPy sin nombres de columnas
+        X_vals = df[FEATURE_COLS].values
+        y_time = df["real_time_min"].values
+        y_profit = df["profitable"].values
         
-        self.time_model = RandomForestRegressor(n_estimators=50, max_depth=6, random_state=42, n_jobs=1)
+        X_tr, X_te, yt_tr, yt_te, yp_tr, yp_te = train_test_split(X_vals, y_time, y_profit, test_size=0.2, random_state=42)
+        
+        self.time_model = RandomForestRegressor(n_estimators=50, max_depth=8, random_state=42, n_jobs=-1)
         self.time_model.fit(X_tr, yt_tr)
         
-        self.profit_model = RandomForestClassifier(n_estimators=50, max_depth=6, random_state=42, n_jobs=1)
+        self.profit_model = RandomForestClassifier(n_estimators=50, max_depth=8, random_state=42, n_jobs=-1)
         self.profit_model.fit(X_tr, yp_tr)
         
         with open(pkl_time, "wb") as f: pickle.dump(self.time_model, f)
@@ -118,12 +132,10 @@ class DeliveryMLModel:
         self._trained = True
 
     def _fallback_heuristic(self, features: dict[str, Any], reason: str) -> MLPrediction:
-        """Heurística física determinista cuando el modelo entra en estado degradado."""
         distance = features.get("distance_km", 3.0)
-        speed = 20.0  # Velocidad promedio conservadora en MTY (20 km/h)
-        base_time = (distance / speed) * 60 + 5.0  # +5 min preparación
+        speed = 20.0
+        base_time = (distance / speed) * 60 + 5.0
         
-        # Penalizaciones genéricas sencillas
         if features.get("is_mountain_zone", 0): base_time += 7.0
         if features.get("gonzalitos_bottle_neck", 0): base_time += 10.0
         
@@ -133,16 +145,18 @@ class DeliveryMLModel:
         
         return MLPrediction(
             estimated_time_minutes=round(base_time, 2),
+            time_lower_bound=round(base_time * 0.85, 2),
+            time_upper_bound=round(base_time * 1.25, 2),
+            uncertainty_range_minutes=round(base_time * 0.40, 2),
             projected_earnings_per_min=round(epm, 2),
-            ml_confidence_score=0.50,  # Confianza neutral al usar heurística
+            pessimistic_epm=round((gross - fuel) / max(base_time * 1.25, 1.0), 2),
+            ml_confidence_score=0.50,
             profitability_label=int(epm >= 6.0),
             is_degraded=True,
             fallback_reason=reason
         )
 
     def predict(self, features: dict[str, Any]) -> MLPrediction:
-        """Predicción con Circuit Breaker integrado."""
-        # 1. Fallback por bandera explícita de degradación o falta de modelo
         if self.is_degraded or not self._trained or self.time_model is None:
             return self._fallback_heuristic(features, reason="Model explicitly marked as degraded or untrained")
 
@@ -161,28 +175,43 @@ class DeliveryMLModel:
                 is_peak = (7 <= hour <= 9) or (17 <= hour <= 20)
                 features_with_defaults["gonzalitos_bottle_neck"] = 1 if (is_peak and traffic >= 2) else 0
 
-            x = pd.DataFrame([{c: features_with_defaults.get(c, 0) for c in FEATURE_COLS}])
-            t = float(self.time_model.predict(x)[0])
-            proba = float(self.profit_model.predict_proba(x)[0, 1])
+            # Convertir a matriz NumPy pura (1, N_features)
+            x_vals = np.array([[features_with_defaults.get(c, 0) for c in FEATURE_COLS]])
+
+            # Vectorización ultrarrápida de predicciones por árbol
+            tree_predictions = np.array([tree.predict(x_vals)[0] for tree in self.time_model.estimators_])
+            
+            t_mean = float(np.mean(tree_predictions))
+            t_p10 = float(np.percentile(tree_predictions, 10))
+            t_p90 = float(np.percentile(tree_predictions, 90))
+            uncertainty_range = t_p90 - t_p10
+
+            proba = float(self.profit_model.predict_proba(x_vals)[0, 1])
             
             elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-            # 2. Circuit Breaker por latencia (SLA max 50ms)
             if elapsed_ms > 50.0:
                 return self._fallback_heuristic(features, reason=f"SLA latency budget exceeded ({elapsed_ms:.1f}ms > 50ms)")
 
             fuel = distance * features.get("vehicle_speed_factor", 1.0) * 4.5
             gross = features.get("base_pay", 0) * features.get("surge_multiplier", 1.0) + features.get("tip", 0)
-            epm = (gross - fuel) / max(t, 1.0)
             
+            epm_expected = (gross - fuel) / max(t_mean, 1.0)
+            epm_pessimistic = (gross - fuel) / max(t_p90, 1.0)
+            
+            adjusted_confidence = round(max(0.1, proba * (1.0 - min(uncertainty_range / 30.0, 0.5))), 3)
+
             return MLPrediction(
-                estimated_time_minutes=round(t, 2), 
-                projected_earnings_per_min=round(epm, 2),
-                ml_confidence_score=round(proba, 3), 
-                profitability_label=int(proba > 0.5),
+                estimated_time_minutes=round(t_mean, 2),
+                time_lower_bound=round(t_p10, 2),
+                time_upper_bound=round(t_p90, 2),
+                uncertainty_range_minutes=round(uncertainty_range, 2),
+                projected_earnings_per_min=round(epm_expected, 2),
+                pessimistic_epm=round(epm_pessimistic, 2),
+                ml_confidence_score=adjusted_confidence,
+                profitability_label=int(epm_expected >= 6.0),
                 is_degraded=False
             )
 
         except Exception as err:
-            # 3. Circuit Breaker ante fallos imprevistos de datos/cálculo
             return self._fallback_heuristic(features, reason=f"Runtime exception trapped: {str(err)}")
