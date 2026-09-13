@@ -1,7 +1,17 @@
 """
 Motor de decisión del repartidor con evaluación de incertidumbre.
+
+Public API
+----------
+CourierDecider  — class used by demo_live.py, tests, and the API server.
+                  Produces responses matching decision_response_schema.json.
+decide_order    — lower-level function (kept for backward compatibility).
 """
 from __future__ import annotations
+
+# Re-export the class so `from onego.courier.decide import CourierDecider` works.
+from onego.courier.courier_decider import CourierDecider  # noqa: F401
+
 from typing import Any, Dict
 
 from onego.models.ml_models import DeliveryMLModel, MLPrediction
