@@ -27,4 +27,8 @@ export type {
   DecideResponse,
   ExplainAlternative,
   ExplainDecisionResponse,
+  AIDecisionExplanation,
+  AIFinancialBreakdown,
+  AISafetyBreakdown,
+  AIGeospatialTactics,
 } from './api'

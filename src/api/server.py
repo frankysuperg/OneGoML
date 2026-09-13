@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -44,13 +45,17 @@ from typing import Any, AsyncGenerator
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from dotenv import load_dotenv
 
 # ── Path setup ──────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent  # src/
 sys.path.insert(0, str(ROOT))
+load_dotenv(ROOT.parent / ".env")
 
 from onego.courier.decide import CourierDecider
 from onego.data.generador_delivery_mty import EventGenerator
+from onego.ai.explainer import AIDecisionExplainer
 
 # ── Application ─────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -70,6 +75,7 @@ app.add_middleware(
 
 # ── Shared state ─────────────────────────────────────────────────────────────
 _decider = CourierDecider()
+_ai_explainer = AIDecisionExplainer()
 
 # In-memory event log: order_id -> full explain_decision_response payload.
 _explain_log: dict[str, dict[str, Any]] = {}
@@ -106,6 +112,7 @@ async def decide(body: dict[str, Any]) -> dict[str, Any]:
         "order_id": order_id,
         "decision": result["decision"],
         "reason": result["reason"],
+        "binding_constraint": result.get("binding_constraint"),
         "inputs": {
             "position_zone": body.get("zone_pickup"),
             "zone_dropoff": body.get("zone_dropoff"),
@@ -137,6 +144,7 @@ async def explain_decision(order_id: str = Query(...)) -> dict[str, Any]:
     Returns the stored explanation for a past decision.
     Reads from in-memory log — never re-runs the system (Req 6.1).
     Response time < 10 s guaranteed.
+    Enriched with deep AI interpretation and metric breakdown.
     """
     if order_id not in _explain_log:
         raise HTTPException(
@@ -144,7 +152,89 @@ async def explain_decision(order_id: str = Query(...)) -> dict[str, Any]:
             detail=f"No decision log found for order_id='{order_id}'. "
                    "Call POST /decide first or run the simulation stream.",
         )
-    return _explain_log[order_id]
+    stored = _explain_log[order_id]
+    if "ai_explanation" not in stored:
+        stored["ai_explanation"] = _ai_explainer.explain(
+            order_id=order_id,
+            decision=stored["decision"],
+            reason=stored["reason"],
+            inputs=stored.get("inputs", {}),
+            binding_constraint=stored.get("binding_constraint"),
+        )
+    return stored
+
+
+# ── POST /explain_ai ─────────────────────────────────────────────────────────
+class ExplainAIRequest(BaseModel):
+    order_id: str
+    api_key: str | None = None
+    force_local: bool = False
+
+
+@app.post("/explain_ai")
+async def explain_ai(req: ExplainAIRequest) -> dict[str, Any]:
+    """
+    On-demand AI breakdown and natural-language interpretation of an order decision.
+    Uses Google Gemini if API key is provided, or the built-in Local AI Explainer engine.
+    """
+    if req.order_id not in _explain_log:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No decision log found for order_id='{req.order_id}'. "
+                   "Call POST /decide first or run the simulation stream.",
+        )
+    stored = _explain_log[req.order_id]
+    explainer = AIDecisionExplainer(api_key=req.api_key) if req.api_key else _ai_explainer
+    ai_res = explainer.explain(
+        order_id=req.order_id,
+        decision=stored["decision"],
+        reason=stored["reason"],
+        inputs=stored.get("inputs", {}),
+        binding_constraint=stored.get("binding_constraint"),
+        force_local=req.force_local,
+    )
+    stored["ai_explanation"] = ai_res
+    return ai_res
+
+
+# ── GET/POST /config/gemini_key ──────────────────────────────────────────────
+class GeminiKeyConfig(BaseModel):
+    api_key: str
+
+
+@app.get("/config/gemini_key")
+async def get_gemini_key() -> dict[str, Any]:
+    """Check if Gemini API key is configured."""
+    key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    return {
+        "configured": bool(key),
+        "masked_key": f"{key[:4]}...{key[-4:]}" if key and len(key) > 8 else ("configured" if key else None),
+    }
+
+
+@app.post("/config/gemini_key")
+async def set_gemini_key(req: GeminiKeyConfig) -> dict[str, Any]:
+    """Dynamically set Gemini API key and persist to .env."""
+    global _ai_explainer
+    clean_key = req.api_key.strip()
+    os.environ["GEMINI_API_KEY"] = clean_key
+    _ai_explainer = AIDecisionExplainer(api_key=clean_key)
+
+    env_path = ROOT.parent / ".env"
+    try:
+        lines = []
+        if env_path.exists():
+            lines = [l for l in env_path.read_text(encoding="utf-8").splitlines() if not l.startswith("GEMINI_API_KEY=")]
+        lines.append(f"GEMINI_API_KEY={clean_key}")
+        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "configured": bool(clean_key),
+        "masked_key": f"{clean_key[:4]}...{clean_key[-4:]}" if len(clean_key) > 8 else "configured",
+    }
 
 
 # ── Helper for Baseline (GreedyRate) Decisions ────────────────────────────────
@@ -309,6 +399,7 @@ async def events_stream(
                     "order_id": order_id,
                     "decision": dec_res["decision"],
                     "reason": dec_res["reason"],
+                    "binding_constraint": dec_res.get("binding_constraint"),
                     "inputs": {
                         "position_zone": raw_event.get("zone_pickup"),
                         "zone_dropoff": raw_event.get("zone_dropoff"),
@@ -596,6 +687,7 @@ async def replay_log(
                 "order_id": order_id,
                 "decision": r["decision"],
                 "reason": r["reason"],
+                "binding_constraint": r.get("binding_constraint"),
                 "inputs": {
                     "position_zone": raw.get("zone_pickup"),
                     "zone_dropoff": raw.get("zone_dropoff"),

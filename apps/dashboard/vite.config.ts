@@ -24,6 +24,14 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      '/explain_ai': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      '/config': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
       '/shock': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

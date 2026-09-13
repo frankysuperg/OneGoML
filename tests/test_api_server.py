@@ -73,6 +73,23 @@ def test_explain_decision_endpoint():
     assert len(data["alternatives_considered"]) >= 1
     assert "option" in data["alternatives_considered"][0]
     assert "rejected_because" in data["alternatives_considered"][0]
+    assert "ai_explanation" in data
+    assert "executive_summary" in data["ai_explanation"]
+    assert "financial_breakdown" in data["ai_explanation"]
+
+
+def test_explain_ai_endpoint():
+    """POST /explain_ai must return structured AI breakdown and interpretation."""
+    client.post("/decide", json=PROBE_ORDER)
+    res = client.post("/explain_ai", json={"order_id": "TEST-ORD-001", "force_local": True})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["order_id"] == "TEST-ORD-001"
+    assert "executive_summary" in data
+    assert "financial_breakdown" in data
+    assert "safety_breakdown" in data
+    assert "courier_recommendation" in data
+    assert data["confidence_score"] >= 0.90
 
 
 def test_status_endpoint():
