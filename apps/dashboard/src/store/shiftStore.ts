@@ -96,7 +96,7 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
         })
       }
     } catch {
-      // Backend not running or offline
+      set({ modelConnection: 'offline' })
     }
   },
 

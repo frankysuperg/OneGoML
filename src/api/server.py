@@ -46,12 +46,15 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from dotenv import load_dotenv
-
 # ── Path setup ──────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent  # src/
 sys.path.insert(0, str(ROOT))
-load_dotenv(ROOT.parent / ".env")
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(ROOT.parent / ".env")
+except ImportError:
+    pass
 
 from onego.courier.decide import CourierDecider
 from onego.data.generador_delivery_mty import EventGenerator
