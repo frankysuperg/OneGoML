@@ -1,62 +1,94 @@
 """
-Generador determinista por seed. Cumple: byte-identical order stream per seed.
+Generador de eventos sintéticos adaptado a la Zona Metropolitana de Monterrey (ZMM).
+Genera flujo continuo en formato JSON Lines (.jsonl).
 """
-from __future__ import annotations
 import json
 import random
-from datetime import datetime
 from pathlib import Path
-from typing import Iterator
 
-ZONES_MTY = [
-    {"name": "San Pedro", "lat": 25.6693, "lng": -100.3100, "risk": 0},
-    {"name": "Valle Oriente", "lat": 25.6332, "lng": -100.3117, "risk": 0},
-    {"name": "Centro", "lat": 25.6866, "lng": -100.3161, "risk": 1},
-    {"name": "Cumbres", "lat": 25.7392, "lng": -100.3942, "risk": 1},
-    {"name": "Santa Catarina", "lat": 25.6749, "lng": -100.4489, "risk": 2},
-    {"name": "García", "lat": 25.7747, "lng": -100.5558, "risk": 2},
+ZONAS_MTY = [
+    {"nombre": "San Pedro", "risk": 0, "mountain": 0},
+    {"nombre": "Centro MTY", "risk": 1, "mountain": 0},
+    {"nombre": "Cumbres Altas", "risk": 0, "mountain": 1},
+    {"nombre": "Tec / San Rafael", "risk": 0, "mountain": 0},
+    {"nombre": "Santa Catarina", "risk": 1, "mountain": 0},
+    {"nombre": "Valle Oriente", "risk": 0, "mountain": 1},
 ]
 
-class EventGenerator:
-    def __init__(self, seed: int = 42, n_offers: int = 20):
-        self.rng = random.Random(seed) # Deterministic
-        self.n_offers = n_offers
-        self.order_counter = 0
+def generar_eventos_mty(num_eventos: int = 20, output_path: str = "src/onego/data/event_log.jsonl"):
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
 
-    def _offer(self, surge: float = 1.0, traffic: int = 1, weather: int = 0) -> dict:
-        self.order_counter += 1
-        pickup = self.rng.choice(ZONES_MTY)
-        dropoff = self.rng.choice([z for z in ZONES_MTY if z["name"] != pickup["name"]])
-        return {
-            "event_type": "OFFER",
-            "timestamp": "2024-10-25T10:00:00Z", # Fixed for determinism
-            "order_id": f"ORD-{self.order_counter:05d}",
-            "pickup_zone": pickup["name"], "pickup_lat": round(pickup["lat"] + self.rng.uniform(-0.005, 0.005), 5),
-            "pickup_lng": round(pickup["lng"] + self.rng.uniform(-0.005, 0.005), 5),
-            "dropoff_zone": dropoff["name"], "dropoff_lat": round(dropoff["lat"] + self.rng.uniform(-0.005, 0.005), 5),
-            "dropoff_lng": round(dropoff["lng"] + self.rng.uniform(-0.005, 0.005), 5),
-            "distance_km": round(self.rng.uniform(1.5, 28.0), 2), # Can exceed 25km to trigger safety
-            "base_pay": round(self.rng.uniform(30, 150), 2),
-            "tip": self.rng.choice([0, 0, 10, 20, 40]),
-            "surge_multiplier": round(surge * self.rng.uniform(0.9, 1.2), 2),
-            "traffic_level": traffic, "weather_severity": weather,
-            "zone_risk": max(pickup["risk"], dropoff["risk"]),
-            "weight_kg": round(self.rng.uniform(1, 20), 1),
-        }
+    eventos = []
+    
+    # 1. Evento de inicio de turno
+    eventos.append({
+        "event_type": "shift_start",
+        "timestamp": "2026-09-12T18:00:00Z",
+        "courier_id": "courier_mty_01",
+        "initial_zone": "Centro MTY",
+        "reservation_wage_mxn": 95.0
+    })
 
-    def _weather(self, severity: int) -> dict:
-        return {"event_type": "WEATHER_EVENT", "timestamp": "2024-10-25T10:00:00Z", "city": "Monterrey", "severity": severity, "description": ["Despejado", "Lluvia", "Tormenta severa"][severity]}
+    # 2. Generación de pedidos y shocks
+    for i in range(1, num_eventos - 1):
+        origen = random.choice(ZONAS_MTY)
+        destino = random.choice(ZONAS_MTY)
+        distancia = round(random.uniform(1.2, 12.5), 2)
+        hora = random.randint(12, 21)
+        trafico = random.randint(0, 3)
 
-    def stream(self, inject_surge: float = 1.0, inject_weather: int = 0, inject_traffic: int = 1) -> Iterator[dict]:
-        yield self._weather(inject_weather)
-        for i in range(self.n_offers):
-            yield self._offer(surge=inject_surge, traffic=inject_traffic, weather=inject_weather)
-            if i % 5 == 4 and self.rng.random() < 0.4:
-                yield {"event_type": "TRAFFIC_UPDATE", "timestamp": "2024-10-25T10:00:00Z", "zone": "Centro", "traffic_level": self.rng.randint(0, 3)}
+        # Determinar si cruza municipios o pasa por arterias principales
+        is_cross = 1 if origen["nombre"] != destino["nombre"] or distancia > 6.0 else 0
+        is_mountain = 1 if (origen["mountain"] or destino["mountain"]) else 0
+        gonzalitos = 1 if (17 <= hora <= 20 and trafico >= 2) else 0
 
-    def to_file(self, path: str | Path = "events.jsonl") -> Path:
-        p = Path(path)
-        with p.open("w") as f:
-            for ev in self.stream():
-                f.write(json.dumps(ev) + "\\n")
-        return p
+        if random.random() < 0.8:
+            # Evento de orden ofrecida
+            evento = {
+                "event_type": "order_offered",
+                "event_id": f"ord_{i:03d}",
+                "timestamp": f"2026-09-12T18:{i:02d}:00Z",
+                "distance_km": distancia,
+                "base_pay": round(random.uniform(30.0, 150.0), 2),
+                "tip": round(random.uniform(0.0, 45.0), 2),
+                "surge_multiplier": random.choice([1.0, 1.2, 1.5, 2.0]),
+                "hour_of_day": hora,
+                "traffic_level": trafico,
+                "weather_severity": random.choice([0, 1, 2]),
+                "zone_risk": max(origen["risk"], destino["risk"]),
+                "pickup_zone": origen["nombre"],
+                "dropoff_zone": destino["nombre"],
+                "is_cross_municipality": is_cross,
+                "is_mountain_zone": is_mountain,
+                "gonzalitos_bottle_neck": gonzalitos
+            }
+        else:
+            # Evento de imprevisto / shock en vivo
+            evento = {
+                "event_type": "shock",
+                "event_id": f"shk_{i:03d}",
+                "timestamp": f"2026-09-12T18:{i:02d}:00Z",
+                "shock_type": random.choice(["rain_storm", "gonzalitos_traffic_jam", "surge_boost"]),
+                "affected_zone": origen["nombre"],
+                "severity": random.randint(1, 3)
+            }
+        
+        eventos.append(evento)
+
+    # 3. Evento de cierre de turno
+    eventos.append({
+        "event_type": "shift_end",
+        "timestamp": "2026-09-12T22:00:00Z",
+        "courier_id": "courier_mty_01"
+    })
+
+    # Escribir archivo .jsonl
+    with open(output_file, "w", encoding="utf-8") as f:
+        for ev in eventos:
+            f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+
+    print(f"✅ Se generó con éxito {len(eventos)} eventos en '{output_path}'")
+
+if __name__ == "__main__":
+    generar_eventos_mty()
