@@ -1,5 +1,6 @@
 """
 Pipeline ML con Intervalos de Confianza (Uncertainty Bounds) y Circuit Breaker.
+Optimizado para inferencia en tiempo real en la ZMM.
 """
 from __future__ import annotations
 import pickle
@@ -13,7 +14,7 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
-# Silenciar advertencias de Scikit-Learn durante la inferencia de cuantiles
+# Silenciar advertencias de Scikit-Learn durante la inferencia
 warnings.filterwarnings("ignore", category=UserWarning)
 
 FEATURE_COLS = [
@@ -109,7 +110,6 @@ class DeliveryMLModel:
             return
         
         df = self._synthetic_dataset()
-        # Entrenar usando matrices de NumPy sin nombres de columnas
         X_vals = df[FEATURE_COLS].values
         y_time = df["real_time_min"].values
         y_profit = df["profitable"].values
