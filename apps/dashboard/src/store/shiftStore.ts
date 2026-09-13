@@ -12,11 +12,17 @@ import {
 } from '../data/mockTimeline'
 import { MOCK_EXPLANATIONS } from '../data/mockExplain'
 import { addSimMinutes, simTimeMs } from '../lib/simTime'
+import {
+  SSEEventSource,
+  injectShockApi,
+  fetchStatusApi,
+  type Unsubscribe,
+} from '../data/eventStream'
 import type { ExplainDecisionResponse, ShockType, SimulatorEvent } from '../types'
 import type { ShiftSnapshot, SimSpeed, SimulationStatus } from './types'
 
 const INITIAL: ShiftSnapshot = {
-  status: 'Running',
+  status: 'Paused',
   simTime: INITIAL_SIM_TIME,
   shiftEndTime: SHIFT_END_TIME,
   shiftHours: 8,
@@ -51,6 +57,7 @@ interface ShiftStore extends ShiftSnapshot {
   tick: () => void
   step: () => void
   dispatchShock: (shockType: ShockType) => void
+  syncStatus: () => Promise<void>
   /** Enter replay mode with a chronologically-ordered event array. */
   enterReplay: (log: SimulatorEvent[]) => void
   /** Exit replay and return to the live simulation state. */
@@ -65,33 +72,120 @@ interface ShiftStore extends ShiftSnapshot {
 
 /** Snapshot of live-sim state saved before entering replay so we can restore it. */
 let _liveSnapshot: ShiftSnapshot | null = null
+let _streamUnsub: Unsubscribe | null = null
 
 export const useShiftStore = create<ShiftStore>((set, get) => ({
   ...INITIAL,
 
   setStatus: (status) => set({ status }),
-  setSpeed: (speed) => set({ speed }),
+  setSpeed: (speed) => {
+    set({ speed })
+    // If running, restart stream to reflect new speed
+    if (get().status === 'Running') {
+      get().start()
+    }
+  },
+
+  syncStatus: async () => {
+    try {
+      const data = await fetchStatusApi()
+      if (data) {
+        set({
+          modelConnection: data.model_connection ?? 'online',
+          vehicle: data.vehicle ?? get().vehicle,
+        })
+      }
+    } catch {
+      // Backend not running or offline
+    }
+  },
 
   start: () => {
-    const { status, restart } = get()
-    if (status === 'Running') return
+    const { status, restart, seed, speed, vehicle } = get()
     if (status === 'Finished') {
       restart()
-      set({ status: 'Running' })
-      return
     }
+
+    if (_streamUnsub) {
+      _streamUnsub()
+      _streamUnsub = null
+    }
+
     set({ status: 'Running' })
+
+    try {
+      const source = new SSEEventSource({
+        seed,
+        speed,
+        vehicle,
+        onEnd: () => {
+          set({ status: 'Finished' })
+        },
+        onError: () => {
+          // Keep running, local ticks can take over if SSE drops
+        },
+      })
+
+      _streamUnsub = source.subscribe((payload) => {
+        const s = get()
+        if (s.status !== 'Running' && s.status !== 'Finished') return
+
+        const extra: Record<string, ExplainDecisionResponse> = {}
+        if (payload.event === 'decision') {
+          extra[payload.order_id] = explainForDecision(
+            payload.order_id,
+            payload.decision,
+            payload.reason,
+          )
+        }
+
+        const nextShocks =
+          payload.event === 'shock'
+            ? [
+                ...s.activeShocks.filter(
+                  (x) => x.shock_type !== payload.shock_type,
+                ),
+                shockToActive(payload),
+              ]
+            : s.activeShocks
+
+        const nextEvents =
+          payload.event === 'shift_start'
+            ? [toEntry(payload)]
+            : [toEntry(payload), ...s.events]
+
+        set({
+          simTime: payload.sim_time || s.simTime,
+          events: nextEvents,
+          explanationsByOrderId: { ...s.explanationsByOrderId, ...extra },
+          activeShocks: nextShocks,
+          status: payload.event === 'shift_end' ? 'Finished' : s.status,
+        })
+      })
+    } catch {
+      // Fallback
+    }
   },
 
   pause: () => {
+    if (_streamUnsub) {
+      _streamUnsub()
+      _streamUnsub = null
+    }
     if (get().status === 'Running') set({ status: 'Paused' })
   },
 
   resume: () => {
-    if (get().status === 'Paused') set({ status: 'Running' })
+    if (get().status === 'Paused') {
+      get().start()
+    }
   },
 
   restart: () => {
+    if (_streamUnsub) {
+      _streamUnsub()
+      _streamUnsub = null
+    }
     set({
       ...INITIAL,
       events: buildSeedLog(),
@@ -110,6 +204,8 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
   tick: () => {
     const s = get()
     if (s.status !== 'Running') return
+    // If backend SSE is streaming, simTime is updated by events;
+    // this timer provides fallback clock advancement if no event arrives
     const next = addSimMinutes(s.simTime, 1)
     if (finishIfDue(next, s.shiftEndTime)) {
       const hasEnd = s.events.some((e) => e.payload.event === 'shift_end')
@@ -161,6 +257,8 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
     const s = get()
     const payload = buildShockEvent(s.simTime, shockType)
     const active = shockToActive(payload)
+
+    // Optimistically update frontend store
     set({
       activeShocks: [
         ...s.activeShocks.filter((x) => x.shock_type !== shockType),
@@ -168,10 +266,26 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
       ],
       events: [toEntry(payload), ...s.events],
     })
+
+    // Notify backend
+    injectShockApi({
+      shock_type: shockType,
+      zone: payload.zone ?? 11,
+      multiplier: payload.multiplier,
+      road: payload.road,
+      duration_min: payload.duration_min,
+    }).catch(() => {
+      // Backend not running, local shock was applied
+    })
   },
 
   enterReplay: (log: SimulatorEvent[]) => {
     const s = get()
+    if (_streamUnsub) {
+      _streamUnsub()
+      _streamUnsub = null
+    }
+
     // Save current live state so exitReplay can restore it exactly
     _liveSnapshot = {
       status: s.status,
@@ -197,13 +311,12 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
     const replaySeed =
       shiftStart?.event === 'shift_start' ? shiftStart.seed : null
 
-    // Replay starts empty — events are emitted one-by-one as it plays
     set({
       status: 'Replay',
       replayLog: log,
       replaySeed,
       replayCursor: 0,
-      replayPlaying: false,
+      replayPlaying: true,
       events: [],
       explanationsByOrderId: {},
       activeShocks: [],
@@ -216,7 +329,6 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
       set({ ..._liveSnapshot })
       _liveSnapshot = null
     } else {
-      // Fallback: full reset to live mode
       set({
         ...INITIAL,
         events: buildSeedLog(),
@@ -238,7 +350,6 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
     const s = get()
     if (s.status !== 'Replay' || !s.replayPlaying || !s.replayLog) return
     if (s.replayCursor >= s.replayLog.length) {
-      // Replay finished — pause at end
       set({ replayPlaying: false })
       return
     }
@@ -253,7 +364,6 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
       )
     }
 
-    // Update activeShocks from shock events
     const nextShocks =
       payload.event === 'shock'
         ? [
@@ -264,9 +374,12 @@ export const useShiftStore = create<ShiftStore>((set, get) => ({
           ]
         : s.activeShocks
 
+    const isShiftEnd = payload.event === 'shift_end'
+
     set({
       simTime: payload.sim_time,
       replayCursor: s.replayCursor + 1,
+      replayPlaying: isShiftEnd ? false : s.replayPlaying,
       events: [toEntry(payload), ...s.events],
       explanationsByOrderId: { ...s.explanationsByOrderId, ...extra },
       activeShocks: nextShocks,

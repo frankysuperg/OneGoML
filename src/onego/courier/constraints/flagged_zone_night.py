@@ -11,9 +11,10 @@ from __future__ import annotations
 # In the real simulator this list comes from the map metadata; here it is the
 # initial seed set. Add zone ids as the simulator map grows.
 FLAGGED_ZONES: frozenset[int] = frozenset({
-    2,   # Centro MTY (risk=1 in generador)
-    5,   # Santa Catarina (risk=1 in generador)
-    13,  # placeholder — add real zone ids when simulator map is wired
+    2,   # Centro MTY (legacy)
+    5,   # Santa Catarina (risk=1)
+    11,  # Centro MTY (risk=1 in generador_delivery_mty)
+    13,  # placeholder
 })
 
 NIGHT_HOUR = 22  # 22:00 local sim time
@@ -41,7 +42,8 @@ def check(order: dict, state: dict) -> dict | None:
     if hour is None:
         return None  # cannot evaluate without sim_time; fail open
 
-    if zone_dropoff in FLAGGED_ZONES and hour >= NIGHT_HOUR:
+    is_flagged = zone_dropoff in FLAGGED_ZONES or bool(order.get("zone_risk", 0) >= 1) or bool(order.get("is_flagged", False))
+    if is_flagged and hour >= NIGHT_HOUR:
         return {
             "decision": "SKIP",
             "binding_constraint": "flagged_zone_night",

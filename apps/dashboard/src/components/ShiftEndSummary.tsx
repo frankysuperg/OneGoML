@@ -14,18 +14,21 @@ interface ShiftEndSummaryProps {
 function pickWinner(agents: AgentViewModel[]): string {
   if (agents.length === 0) return '—'
   const ranked = [...agents].sort((a, b) => {
-    const earn = b.economics.earningsMxn - a.economics.earningsMxn
-    if (earn !== 0) return earn
+    // Primary criterion: highest earnings per hour (MXN/h)
     const rate = b.economics.mxnPerHour - a.economics.mxnPerHour
     if (rate !== 0) return rate
+    // Secondary criterion: total earnings
+    const earn = b.economics.earningsMxn - a.economics.earningsMxn
+    if (earn !== 0) return earn
+    // Tertiary criterion: fewest safety violations
     return a.economics.safetyViolations - b.economics.safetyViolations
   })
   const top = ranked[0]
   const second = ranked[1]
   if (
     second &&
-    top.economics.earningsMxn === second.economics.earningsMxn &&
     top.economics.mxnPerHour === second.economics.mxnPerHour &&
+    top.economics.earningsMxn === second.economics.earningsMxn &&
     top.economics.safetyViolations === second.economics.safetyViolations
   ) {
     return 'Tie'
@@ -121,7 +124,7 @@ export function ShiftEndSummary({
                   key={agent.name}
                   className={`rounded-lg border px-3 py-3 ${
                     isWinner
-                      ? 'border-neutral-950 bg-accent/40'
+                      ? 'border-amber-400 bg-amber-50/70 shadow-sm'
                       : 'border-neutral-200 bg-neutral-50'
                   }`}
                 >
@@ -136,15 +139,16 @@ export function ShiftEndSummary({
                     ) : null}
                   </div>
                   <p
-                    className="mt-2 inline-block rounded px-2 py-0.5 text-xl font-bold tabular-nums text-neutral-950"
-                    style={{ backgroundColor: '#fbf546' }}
+                    className={`mt-2 inline-block rounded px-2 py-0.5 text-xl font-bold tabular-nums text-neutral-950 ${
+                      isWinner ? 'bg-[#fbf546]' : 'bg-neutral-200/80 text-neutral-700'
+                    }`}
                   >
-                    {formatMxn(agent.economics.earningsMxn, 0)}
+                    {formatMxnPerHour(agent.economics.mxnPerHour)}
                   </p>
                   <dl className="mt-3 space-y-1 text-sm">
                     <Row
-                      label="MXN/h"
-                      value={formatMxnPerHour(agent.economics.mxnPerHour)}
+                      label="Total earnings"
+                      value={formatMxn(agent.economics.earningsMxn, 0)}
                     />
                     <Row
                       label="Completed"
