@@ -3,6 +3,7 @@ import { AgentPanel, type AgentViewModel } from './components/AgentPanel'
 import { AgentsComparisonBar } from './components/AgentsComparisonBar'
 import { AppShell } from './components/AppShell'
 import { EventTimeline } from './components/EventTimeline'
+import { ReplayControls } from './components/ReplayControls'
 import { ShiftEndSummary } from './components/ShiftEndSummary'
 import { ShockTriggerControl } from './components/ShockTriggerControl'
 import { SimulationControls } from './components/SimulationControls'
@@ -11,6 +12,7 @@ import {
   MOCK_EXPLAIN_OUR,
   MOCK_EXPLAIN_PAST,
 } from './data/mockExplain'
+import { MOCK_REPLAY_LOG } from './data/mockReplayLog'
 import { shockLabel } from './data/mockTimeline'
 import { useShiftStore } from './store/shiftStore'
 import type { ActiveShock } from './store/types'
@@ -136,8 +138,11 @@ const TICK_HOURS_ELAPSED = 4.4
 function App() {
   const status = useShiftStore((s) => s.status)
   const log = useShiftStore((s) => s.events)
+  const enterReplay = useShiftStore((s) => s.enterReplay)
   const [ourAgent, setOurAgent] = useState(MOCK_OUR_AGENT)
   const [baseline, setBaseline] = useState(MOCK_BASELINE)
+
+  const isReplay = status === 'Replay'
 
   const shocksFaced = useMemo<ActiveShock[]>(() => {
     const seen = new Set<string>()
@@ -191,10 +196,30 @@ function App() {
     <AppShell>
       <div className="flex h-[calc(100vh-3.5rem)] flex-col">
         <AgentsComparisonBar agents={agents} />
+
+        {/* Control bar — switches between live controls and replay controls */}
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-neutral-200 bg-white px-3 py-2">
-          <SimulationControls />
-          <ShockTriggerControl />
+          {isReplay ? (
+            <ReplayControls />
+          ) : (
+            <>
+              <SimulationControls />
+              <div className="flex items-center gap-3">
+                <ShockTriggerControl />
+                {/* Enter Replay button — only visible when not in replay */}
+                <div className="ml-2 h-5 w-px bg-neutral-200" aria-hidden />
+                <button
+                  type="button"
+                  onClick={() => enterReplay(MOCK_REPLAY_LOG)}
+                  className="rounded border border-orange-300 bg-orange-50 px-2 py-1 text-[11px] font-semibold text-orange-800 hover:bg-orange-100"
+                >
+                  Enter Replay ⏪
+                </button>
+              </div>
+            </>
+          )}
         </div>
+
         <div className="flex min-h-0 flex-1 gap-3 p-3">
           <AgentPanel agent={ourAgent} />
           <AgentPanel agent={baseline} />
