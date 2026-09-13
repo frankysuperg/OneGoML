@@ -10,6 +10,7 @@ import { STATUS_LABELS } from './AgentPanel'
  */
 interface AgentsComparisonBarProps {
   agents: AgentViewModel[]
+  className?: string
 }
 
 type Better = 'max' | 'min' | 'none'
@@ -32,7 +33,7 @@ function winnerIndex(numeric: number[], better: Better): number | null {
   return hits.length === 1 ? hits[0] : null
 }
 
-export function AgentsComparisonBar({ agents }: AgentsComparisonBarProps) {
+export function AgentsComparisonBar({ agents, className }: AgentsComparisonBarProps) {
 
   const rows: MetricRow[] = [
     {
@@ -102,23 +103,24 @@ export function AgentsComparisonBar({ agents }: AgentsComparisonBarProps) {
   ]
 
   return (
-    <div className="shrink-0 border-b border-neutral-200 bg-white">
-      <header className="flex items-center gap-3 px-3 pt-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-          Head to head
-        </p>
+    <div className={`shrink-0 rounded-lg border border-neutral-200 bg-white shadow-sm overflow-hidden ${className ?? ''}`}>
+      <header className="flex items-center justify-between gap-2 border-b border-neutral-200 bg-neutral-50/80 px-3 py-2">
+        <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-800 flex items-center gap-1.5">
+          <span>⚖️</span> Head to Head
+        </h2>
+        <span className="text-[10px] text-neutral-500 font-medium">Comparativa en vivo</span>
       </header>
-      <div className="overflow-x-auto px-3 pb-2 pt-1">
-        <table className="w-auto border-collapse text-left text-xs">
+      <div className="overflow-x-auto p-2">
+        <table className="w-full border-collapse text-left text-xs">
           <thead>
             <tr>
-              <th className="w-40 py-0.5 pr-4 font-medium text-neutral-500">
-                Metric
+              <th className="py-1 pr-2 font-medium text-neutral-500 text-xs">
+                Métrica
               </th>
               {agents.map((agent) => (
                 <th
                   key={agent.name}
-                  className="w-36 py-0.5 pr-4 font-semibold text-neutral-950"
+                  className="py-1 px-1.5 text-right font-semibold text-neutral-950 text-xs truncate max-w-[5rem]"
                 >
                   {agent.name}
                 </th>
@@ -129,16 +131,16 @@ export function AgentsComparisonBar({ agents }: AgentsComparisonBarProps) {
             {rows.map((row) => {
               const win = winnerIndex(row.numeric, row.better)
               return (
-                <tr key={row.id} className="border-t border-neutral-100">
-                  <th className="py-0.5 pr-4 font-medium text-neutral-600">
+                <tr key={row.id} className="border-t border-neutral-100 hover:bg-neutral-50/50 transition-colors">
+                  <th className="py-1 pr-2 font-medium text-neutral-600 text-xs">
                     {row.label}
                   </th>
                   {row.values.map((value, i) => {
                     const isBest = win === i
                     return (
-                      <td key={`${row.id}-${i}`} className="py-0.5 pr-4">
+                      <td key={`${row.id}-${i}`} className="py-1 px-1.5 text-right">
                         <span
-                          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 tabular-nums ${
+                          className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 tabular-nums text-xs ${
                             isBest
                               ? 'bg-accent font-bold text-neutral-950'
                               : 'text-neutral-800'

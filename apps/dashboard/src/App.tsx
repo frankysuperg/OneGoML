@@ -372,35 +372,42 @@ function App() {
 
   return (
     <AppShell>
-      <div className="flex h-[calc(100vh-3.5rem)] flex-col">
-        <AgentsComparisonBar agents={agents} />
+      <div className="flex h-[calc(100vh-3.5rem)] flex-col lg:flex-row gap-3 p-3 overflow-hidden">
+        {/* Left / Center Area: ourAgent and GreedyRate div at the top */}
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          {/* DIV DE OURAGENT Y GREEDYRATE HASTA ARRIBA */}
+          <div className="flex min-h-0 flex-1 gap-3">
+            <AgentPanel agent={ourAgent} />
+            <AgentPanel agent={baseline} />
+          </div>
 
-        {/* Control bar — switches between live controls and replay controls */}
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-neutral-200 bg-white px-3 py-2">
-          {isReplay ? (
-            <ReplayControls />
-          ) : (
-            <>
-              <SimulationControls />
-              <div className="flex items-center gap-3">
-                <ShockTriggerControl />
-                <div className="ml-2 h-5 w-px bg-neutral-200" aria-hidden />
-                <button
-                  type="button"
-                  onClick={handleEnterReplay}
-                  className="rounded border border-orange-300 bg-orange-50 px-2 py-1 text-[11px] font-semibold text-orange-800 hover:bg-orange-100"
-                >
-                  Enter Replay ⏪
-                </button>
-              </div>
-            </>
-          )}
+          {/* Barra de Controles y Shocks abajo de los agentes */}
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 shadow-sm">
+            {isReplay ? (
+              <ReplayControls />
+            ) : (
+              <>
+                <SimulationControls />
+                <div className="flex items-center gap-3">
+                  <ShockTriggerControl />
+                  <div className="ml-2 h-5 w-px bg-neutral-200" aria-hidden />
+                  <button
+                    type="button"
+                    onClick={handleEnterReplay}
+                    className="rounded-md border border-orange-300 bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-800 hover:bg-orange-100 transition-colors cursor-pointer"
+                  >
+                    Enter Replay ⏪
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 gap-3 p-3">
-          <AgentPanel agent={ourAgent} />
-          <AgentPanel agent={baseline} />
-          <EventTimeline />
+        {/* Right Area: LA TABLA HASTA LA DERECHA COMPLETAMENTE */}
+        <div className="flex min-h-0 w-full lg:w-[22rem] xl:w-[26rem] shrink-0 flex-col gap-3">
+          <AgentsComparisonBar agents={agents} />
+          <EventTimeline className="w-full flex-1 min-h-[14rem]" />
         </div>
       </div>
       <ShiftEndSummary agents={agents} shocksFaced={shocksFaced} />

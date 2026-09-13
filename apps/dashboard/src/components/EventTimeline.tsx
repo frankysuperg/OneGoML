@@ -85,7 +85,7 @@ function summary(event: SimulatorEvent): string {
   }
 }
 
-export function EventTimeline() {
+export function EventTimeline({ className }: { className?: string } = {}) {
   const events = useShiftStore((s) => s.events)
   const explanations = useShiftStore((s) => s.explanationsByOrderId)
   const { open, explanation, openExplanation, closeExplanation } =
@@ -106,7 +106,7 @@ export function EventTimeline() {
   const remaining = events.length - visible.length
 
   return (
-    <aside className="flex min-h-0 w-[20rem] shrink-0 flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+    <aside className={`flex min-h-0 flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm ${className ?? 'w-[20rem] shrink-0'}`}>
       <header className="flex items-baseline justify-between gap-2 border-b border-neutral-200 px-3 py-2">
         <h2 className="text-sm font-semibold text-neutral-950">Timeline</h2>
         <p className="text-[10px] tabular-nums text-neutral-500">
