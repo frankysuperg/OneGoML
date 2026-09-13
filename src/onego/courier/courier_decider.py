@@ -123,10 +123,14 @@ class CourierDecider:
         ml_prediction = self._model.predict(_order_to_ml_features(order, state))
         estimated_time_min: float = ml_prediction.estimated_time_minutes
 
+        deadhead_km = round(float(order.get("distance_pickup_km", 0.0) or 0.0), 2)
+
         # 3. Safety checks — MUST run before pay arithmetic (safety-over-pay)
         safety_result = run_safety_checks(order, state, estimated_time_min)
         if safety_result is not None:
             latency_ms = (time.perf_counter() - t_start) * 1000
+            net_pay = _compute_net_pay(order, state)
+            raw_rate_hr = (net_pay / max(estimated_time_min, 1.0)) * 60.0
             return _build_response(
                 order_id=order_id,
                 decision=safety_result["decision"],
@@ -134,6 +138,14 @@ class CourierDecider:
                 binding_constraint=safety_result["binding_constraint"],
                 latency_ms=latency_ms,
                 degraded=ml_prediction.is_degraded,
+                economics={
+                    "net_pay_mxn": round(net_pay, 2),
+                    "total_time_min": round(estimated_time_min, 2),
+                    "raw_rate_mxn_hr": round(raw_rate_hr, 2),
+                    "adjusted_rate_mxn_hr": round(raw_rate_hr, 2),
+                    "reservation_wage_mxn_hr": self._reservation_wage,
+                    "deadhead_km": deadhead_km,
+                },
             )
 
         # 4. Pay criterion — reservation wage check
@@ -168,6 +180,7 @@ class CourierDecider:
                     "raw_rate_mxn_hr": round(raw_rate_hr, 2),
                     "adjusted_rate_mxn_hr": round(adjusted_rate_hr, 2),
                     "reservation_wage_mxn_hr": self._reservation_wage,
+                    "deadhead_km": deadhead_km,
                 },
             )
         else:
@@ -187,6 +200,7 @@ class CourierDecider:
                     "raw_rate_mxn_hr": round(raw_rate_hr, 2),
                     "adjusted_rate_mxn_hr": round(adjusted_rate_hr, 2),
                     "reservation_wage_mxn_hr": self._reservation_wage,
+                    "deadhead_km": deadhead_km,
                 },
             )
 

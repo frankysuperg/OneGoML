@@ -8,12 +8,12 @@ Demo interactiva diseñada para demostrar las reglas de los jueces en vivo:
 from __future__ import annotations
 import sys, time
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent))
 
 from onego.courier.decide import CourierDecider
 from onego.data.generador_delivery_mty import EventGenerator
 
-RESET, BOLD, GREEN, RED, YELLOW, CYAN = "\\033[0m", "\\033[1m", "\\033[92m", "\\033[91m", "\\033[93m", "\\033[96m"
+RESET, BOLD, GREEN, RED, YELLOW, CYAN = "\033[0m", "\033[1m", "\033[92m", "\033[91m", "\033[93m", "\033[96m"
 
 HELP = f"""{BOLD}=== OneGo Driver Assistant (HackMTY Demo) ==={RESET}
 Comandos para demostrar rúbrica a los jueces:
@@ -34,17 +34,27 @@ def main():
     auto_remaining = 0
     
     for ev in stream:
-        if ev["event_type"] == "WEATHER_EVENT":
-            print(f"\\n{YELLOW}🌦 Clima: {ev['description']} (severidad {ev['severity']}){RESET}")
-            decider.update_context(weather_severity=ev["severity"])
+        if ev.get("event") == "shock" or ev.get("event_type") == "shock":
+            shock_type = ev.get("shock_type", "shock")
+            print(f"\n{YELLOW}⚡ Shock en vivo: {shock_type} (zona {ev.get('zone', 'N/A')}){RESET}")
+            if shock_type == "rain":
+                decider.update_context(weather_severity=2)
+            elif shock_type == "surge":
+                decider.update_context(surge_multiplier=ev.get("multiplier", 1.6))
+            continue
+
+        if ev.get("event") != "order_offered" and ev.get("event_type") != "order_offered":
             continue
             
         dec = decider.decide(ev)
-        color = GREEN if dec["action"] == "ACCEPT" else RED
-        print(f"\\n{BOLD}📦 {ev['order_id']}{RESET} | {ev['pickup_zone']} → {ev['dropoff_zone']} ({ev['distance_km']}km)")
-        print(f"   Acción: {color}{dec['action']}{RESET} | Restricción: {BOLD}{dec['binding_constraint']}{RESET}")
-        print(f"   Razón: {dec['explanation']}")
-        if dec["metrics"].get("is_degraded_mode"):
+        color = GREEN if dec["decision"] == "ACCEPT" else RED
+        pickup = ev.get("zone_pickup_name") or ev.get("pickup_zone") or str(ev.get("zone_pickup"))
+        dropoff = ev.get("zone_dropoff_name") or ev.get("dropoff_zone") or str(ev.get("zone_dropoff"))
+        dist = ev.get("distance_delivery_km", ev.get("distance_km", 0.0))
+        print(f"\n{BOLD}📦 {ev['order_id']}{RESET} | {pickup} → {dropoff} ({dist}km)")
+        print(f"   Decisión: {color}{dec['decision']}{RESET} | Restricción: {BOLD}{dec.get('binding_constraint') or 'ninguna'}{RESET}")
+        print(f"   Razón: {dec['reason']}")
+        if dec.get("degraded"):
             print(f"   {YELLOW}⚠️ SISTEMA EN MODO DEGRADADO (Fallback heurístico activo){RESET}")
 
         if auto_remaining > 0:

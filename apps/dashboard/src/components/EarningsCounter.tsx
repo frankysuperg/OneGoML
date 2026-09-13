@@ -35,21 +35,22 @@ export function EarningsCounter({ economics }: EarningsCounterProps) {
     formatRemaining(s.simTime, s.shiftEndTime),
   )
   const animatedEarnings = useAnimatedNumber(economics.earningsMxn)
-  const prev = useRef(economics.earningsMxn)
+  const animatedRate = useAnimatedNumber(economics.mxnPerHour)
+  const prev = useRef(economics.mxnPerHour)
   const [bump, setBump] = useState(false)
 
   useEffect(() => {
-    if (prev.current === economics.earningsMxn) return
-    prev.current = economics.earningsMxn
+    if (prev.current === economics.mxnPerHour) return
+    prev.current = economics.mxnPerHour
     setBump(true)
     const id = window.setTimeout(() => setBump(false), 380)
     return () => window.clearTimeout(id)
-  }, [economics.earningsMxn])
+  }, [economics.mxnPerHour])
 
   return (
     <div className="rounded-lg border border-neutral-200 bg-white px-3 py-3">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-        Earnings
+        Rate
       </p>
       <p
         className={`mt-1 inline-block rounded px-2 py-0.5 text-2xl font-bold tabular-nums text-neutral-950 transition-transform duration-300 ${
@@ -57,24 +58,24 @@ export function EarningsCounter({ economics }: EarningsCounterProps) {
         }`}
         style={{ backgroundColor: '#fbf546' }}
       >
-        {formatMxn(animatedEarnings, 1)}
+        {formatMxnPerHour(animatedRate)}
       </p>
 
       <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+        <div>
+          <dt className="text-[10px] uppercase tracking-wide text-neutral-500">
+            Total Earnings
+          </dt>
+          <dd className="font-semibold tabular-nums text-neutral-950">
+            {formatMxn(animatedEarnings, 1)}
+          </dd>
+        </div>
         <div>
           <dt className="text-[10px] uppercase tracking-wide text-neutral-500">
             Completed
           </dt>
           <dd className="font-semibold tabular-nums text-neutral-950">
             {economics.ordersCompleted}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-[10px] uppercase tracking-wide text-neutral-500">
-            Rate
-          </dt>
-          <dd className="font-semibold tabular-nums text-neutral-950">
-            {formatMxnPerHour(economics.mxnPerHour)}
           </dd>
         </div>
         <div>

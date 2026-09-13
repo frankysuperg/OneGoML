@@ -1,4 +1,4 @@
-import { formatMxn, formatMxnPerHour } from '../lib/formatMetrics'
+import { formatKm, formatMxn, formatMxnPerHour } from '../lib/formatMetrics'
 import type { AgentViewModel } from './AgentPanel'
 import { STATUS_LABELS } from './AgentPanel'
 
@@ -36,18 +36,40 @@ export function AgentsComparisonBar({ agents }: AgentsComparisonBarProps) {
 
   const rows: MetricRow[] = [
     {
+      id: 'rate',
+      label: 'Hourly Rate (MXN/h)',
+      better: 'max',
+      numeric: agents.map((a) => a.economics.mxnPerHour),
+      values: agents.map((a) => formatMxnPerHour(a.economics.mxnPerHour)),
+    },
+    {
       id: 'earnings',
-      label: 'Earnings',
+      label: 'Total earnings',
       better: 'max',
       numeric: agents.map((a) => a.economics.earningsMxn),
       values: agents.map((a) => formatMxn(a.economics.earningsMxn, 0)),
     },
     {
-      id: 'rate',
-      label: 'MXN/h',
+      id: 'efficiency',
+      label: 'Efficiency (MXN/km)',
       better: 'max',
-      numeric: agents.map((a) => a.economics.mxnPerHour),
-      values: agents.map((a) => formatMxnPerHour(a.economics.mxnPerHour)),
+      numeric: agents.map((a) =>
+        a.economics.distanceKm > 0
+          ? a.economics.earningsMxn / a.economics.distanceKm
+          : 0,
+      ),
+      values: agents.map((a) =>
+        a.economics.distanceKm > 0
+          ? `$${(a.economics.earningsMxn / a.economics.distanceKm).toFixed(1)}/km`
+          : '—',
+      ),
+    },
+    {
+      id: 'distance',
+      label: 'Distance traveled',
+      better: 'min',
+      numeric: agents.map((a) => a.economics.distanceKm),
+      values: agents.map((a) => formatKm(a.economics.distanceKm)),
     },
     {
       id: 'completed',
